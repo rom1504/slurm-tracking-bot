@@ -44,6 +44,7 @@ def get_msg(
     def group_per_user_name(df):
         return str(df.groupby(["account", "user_name"]).sum("node_count")[["node_count"]].sort_values("node_count"))
 
+    df = df[df["partition"] == "gpu"]
     running = df[df["job_state"] == "RUNNING"]
     pending = df[df["job_state"] == "PENDING"]
     preemptible = running[running["account"].isin(preemptible_accounts)]
