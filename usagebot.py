@@ -58,7 +58,7 @@ def get_msg(
     msg += "Preemptible:\n"+group_per_user_name(preemptible)+"\n\n"
     msg += "Non-preemptible:\n"+group_per_user_name(non_preemptible)+"\n\n"
     msg += f"Idle: {num_idles} nodes\n"
-    msg += f"Pending: {pending_count} nodes\n"
+    msg += f"Pending count: {pending_count} nodes\n"
     msg += f"Preemptible count (these jobs will be killed if needed by non preemtible): {preemptible_count} nodes\n"
     msg += f"Non pre emptible count: {non_preemptible_count} nodes\n"
     msg = msg+"\n```" if backticks else msg
