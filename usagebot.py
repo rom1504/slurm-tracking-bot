@@ -44,20 +44,26 @@ def get_msg(
     def group_per_user_name(df):
         return str(df.groupby(["account", "user_name"]).sum("node_count")[["node_count"]].sort_values("node_count"))
 
-    preemptible = df[df["account"].isin(preemptible_accounts)]
-    non_preemptible = df[~df["account"].isin(preemptible_accounts)]
+    running = df[df["job_state"] == "RUNNING"]
+    pending = df[df["job_state"] == "PENDING"]
+    preemptible = running[running["account"].isin(preemptible_accounts)]
+    non_preemptible = running[~running["account"].isin(preemptible_accounts)]
 
+    pending_count = sum(pending["node_count"].values)
     preemptible_count = sum(preemptible["node_count"].values)
     non_preemptible_count = sum(non_preemptible["node_count"].values)
 
     msg = "```\n" if backticks else ""
+    msg += "Pending:\n"+group_per_user_name(pending)+"\n\n"
     msg += "Preemptible:\n"+group_per_user_name(preemptible)+"\n\n"
     msg += "Non-preemptible:\n"+group_per_user_name(non_preemptible)+"\n\n"
     msg += f"Idle: {num_idles} nodes\n"
+    msg += f"Pending: {pending_count} nodes\n"
     msg += f"Preemptible count (these jobs will be killed if needed by non preemtible): {preemptible_count} nodes\n"
     msg += f"Non pre emptible count: {non_preemptible_count} nodes\n"
     msg = msg+"\n```" if backticks else msg
     return msg
+
 
 
 # Read Discord bot token and channel id from external file
