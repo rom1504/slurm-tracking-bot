@@ -22,7 +22,8 @@ import pandas as pd
 import subprocess
 import sys
 
-def get_msg(
+
+def get_usage_msg(
     backticks=True   # whether to add backticks for Discord formatting or not
     ):
     "gets a list of cluster usage from squeue and creates a text message from it"
@@ -66,39 +67,47 @@ def get_msg(
     return msg
 
 
+print(get_usage_msg(backticks=False))  # get and print cluster usage message to stdout
 
-# Read Discord bot token and channel id from external file
+
+# (try to) Read Discord bot token and channel id from external file
 try:
     info_df = pd.read_csv('token_channel.csv')
     token = info_df['token'][0]
     channel_id = info_df['channel'][0]
-    print("Discord authorization info found.")
-    print("  token =",token)
-    print("  channel_id =",channel_id)
-    print("Proceeding.")
+    print("Discord authorization info found. Sending message to Discord.")
 except:
-    print("No Discord credentials found. Here's a printout:\n")
-    print(get_msg(backticks=False))
+    print("No Discord credentials found. Exiting.")
     sys.exit(1)                   # might as well just stop here
 
 
+class UsageBotClient(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # an attribute we can access from our task
+        self.counter = 0
+
+    async def setup_hook(self) -> None:
+        # start the task to run in the background
+        self.my_background_task.start()
+
+    async def on_ready(self):
+        return
+
+    @tasks.loop(hours=12)  
+    async def my_background_task(self):
+        channel = self.get_channel(channel_id)  # channel ID goes here
+        await channel.send(get_usage_msg())
+
+    @my_background_task.before_loop
+    async def before_my_task(self):
+        await self.wait_until_ready()  # wait until the bot logs in
+
+
 # Initialize bot client object
-client = discord.Client()
-
-
-# Setup background task 
-@tasks.loop(hours=12)
-async def my_background_task():
-    """A background task that gets invoked every __ hours."""
-    channel = client.get_channel(channel_id) 
-    await channel.send(get_msg())
-    
-@my_background_task.before_loop
-async def my_background_task_before_loop():
-    await client.wait_until_ready()
-
-my_background_task.start()
-
+client = UsageBotClient(intents=discord.Intents.default())
 
 # Run the bot
 client.run(token)
+
