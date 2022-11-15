@@ -29,15 +29,8 @@ def get_msg(
     a = json.loads(subprocess.check_output(['squeue','--json']).decode("utf8"))
     df = pd.DataFrame(a["jobs"])
 
-    # tally up number of idle nodes
-    tally_choice = 'rom1504'   
-    if tally_choice == 'rom1504': # json method by rom1504
-        a = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))
-        num_idles = sum([1 for a in  a['nodes'] if a['state'] == 'idle' and 'gpu' in a['name'] and 'POWERED_DOWN' not in a['state_flags']])
-    else:   # shell-based method by drscotthawley
-        cmd = "sinfo | grep ' idle ' | awk '{print $4}' | head -n 1"
-        ps = subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-        num_idles = ps.communicate()[0].decode("utf-8").rstrip()
+    a = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))
+    num_idles = sum([1 for a in  a['nodes'] if a['state'] == 'idle' and 'gpu' in a['name'] and 'POWERED_DOWN' not in a['state_flags']])
 
     preemptible_accounts = [e[0] for e in [l.split("|") for l in subprocess.check_output(['sacctmgr', 'list', '--parsable', 'Account']).decode("utf8").split("\n")] if len(e) >= 3 and e[2] == "root"]
 
