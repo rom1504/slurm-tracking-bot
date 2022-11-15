@@ -21,13 +21,64 @@ import json
 import pandas as pd
 import subprocess
 import sys
+import pandas as pd
+from pssh.clients import ParallelSSHClient
+from io import StringIO
+
+def compute_power_per_node():
+    m = 465
+    #m = 3
+    hosts = ["gpu-st-p4d-24xlarge-"+str(i) for i in range(1,m)]
+    client = ParallelSSHClient(hosts)
+
+    output = list(client.run_command('nvidia-smi --query-gpu="index,serial,power.draw"  --format=csv'))
+
+
+
+    node_to_power_usage = {}
+    for o in output:
+        df = pd.read_csv(StringIO("\n".join(o.stdout)))
+        df["power"] = pd.to_numeric(df[' power.draw [W]'].apply(lambda a:a.replace("W", "").replace(" ", "")), errors='coerce')
+        m = float(df["power"].mean())
+        node_to_power_usage[o.host] = m
+
+    return node_to_power_usage
+
+def expand_nodes(s):
+        s = s.replace("gpu-st-p4d-24xlarge-", "").replace("[","").replace("]","")
+        ns = list(s.split(","))
+        nodes = []
+        for n in ns:
+            if n  == "":
+                continue
+            if "-" in n:
+                b = int(n.split("-")[0])
+                e = int(n.split("-")[1])
+                nodes.extend(list(range(b,e+1)))
+            else:
+                nodes.append(int(n))
+        return ["gpu-st-p4d-24xlarge-"+str(n) for n in nodes]
 
 def get_msg(
     backticks=True   # whether to add backticks for Discord formatting or not
     ):
     "gets a list of cluster usage from squeue and creates a text message from it"
+    enable_power_computation = False
+    if enable_power_computation:
+        node_to_power_usage = compute_power_per_node()
+    
     a = json.loads(subprocess.check_output(['squeue','--json']).decode("utf8"))
     df = pd.DataFrame(a["jobs"])
+    
+    if enable_power_computation:
+        sums = []
+        for nodes in df["nodes"]:
+            fnodes = expand_nodes(nodes)
+            power_usages = [node_to_power_usage[n] if n in node_to_power_usage else 0 for n in fnodes]
+            sum_pw = sum(power_usages)
+            sums.append(sum_pw)
+
+        df["sum_power_usage"] = sums
 
     a = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))
     num_idles = sum([1 for a in  a['nodes'] if a['state'] == 'idle' and 'gpu' in a['name'] and 'POWERED_DOWN' not in a['state_flags']])
@@ -35,7 +86,17 @@ def get_msg(
     preemptible_accounts = [e[0] for e in [l.split("|") for l in subprocess.check_output(['sacctmgr', 'list', '--parsable', 'Account']).decode("utf8").split("\n")] if len(e) >= 3 and e[2] == "root"]
 
     def group_per_user_name(df):
-        return str(df.groupby(["account", "user_name"]).sum("node_count")[["node_count"]].sort_values("node_count"))
+        if enable_power_computation:
+            cols = ["node_count", "sum_power_usage"]
+        else:
+            cols = ["node_count"]
+        g = df.groupby(["account", "user_name"]).sum()[cols]
+        if enable_power_computation:
+            g["average_power_usage"] = g["sum_power_usage"] / g["node_count"]
+            g["gpu_efficiency"] = g["average_power_usage"] / 405.0 * 100
+        g = g.sort_values("node_count")
+        g = g.round(0)
+        return str(g)
 
     df = df[df["partition"] == "gpu"]
     running = df[df["job_state"] == "RUNNING"]
