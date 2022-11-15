@@ -29,20 +29,24 @@ def compute_power_per_node():
     m = 465
     #m = 3
     hosts = ["gpu-st-p4d-24xlarge-"+str(i) for i in range(1,m)]
-    client = ParallelSSHClient(hosts)
+    client = ParallelSSHClient(hosts, timeout=10)
 
-    output = list(client.run_command('nvidia-smi --query-gpu="index,serial,power.draw"  --format=csv'))
+    output = list(client.run_command('bash -c "for i in 1 .. 5 ; do nvidia-smi --query-gpu="power.draw"  --format=csv,noheader,nounits ; sleep 1; done"', stop_on_errors=False))
 
 
 
     node_to_power_usage = {}
     for o in output:
-        df = pd.read_csv(StringIO("\n".join(o.stdout)))
-        df["power"] = pd.to_numeric(df[' power.draw [W]'].apply(lambda a:a.replace("W", "").replace(" ", "")), errors='coerce')
-        m = float(df["power"].mean())
+        df = pd.read_csv(StringIO("\n".join(o.stdout)), header=None)
+        mm = df.mean()
+        if len(mm) == 0:
+            m = 0
+        else:
+            m = float(mm[0])
         node_to_power_usage[o.host] = m
 
     return node_to_power_usage
+
 
 def expand_nodes(s):
         s = s.replace("gpu-st-p4d-24xlarge-", "").replace("[","").replace("]","")
@@ -94,9 +98,11 @@ def get_msg(
         if enable_power_computation:
             g["average_power_usage"] = g["sum_power_usage"] / g["node_count"]
             g["gpu_efficiency"] = g["average_power_usage"] / 405.0 * 100
+            g = g[["node_count","gpu_efficiency"]]
         g = g.sort_values("node_count")
         g = g.round(0)
         return str(g)
+
 
     df = df[df["partition"] == "gpu"]
     running = df[df["job_state"] == "RUNNING"]
