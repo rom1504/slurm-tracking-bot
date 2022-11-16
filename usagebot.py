@@ -40,7 +40,7 @@ def compute_power_per_node():
             if df is None:
                 df = dd
             else:
-                df[" power.draw [W]"] += dd[" power.draw [W]"]
+                df[" power.draw [W]"] += pd.to_numeric(dd[" power.draw [W]"], errors="coerce")
         df["power"] = pd.to_numeric(df[" power.draw [W]"], errors="coerce")/5
         for i, p in zip(df["index"], df["power"]):
             node_gpu_to_power_usage[o.host+":"+str(i)] = p
