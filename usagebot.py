@@ -29,7 +29,10 @@ def compute_power_per_node():
 
     node_gpu_to_power_usage = {}
     for o in output:
-        c = "\n".join(o.stdout)
+        try:
+            c = "\n".join(o.stdout)
+        except TypeError:
+            continue
         cs = c.split("\n\n")
         df = None
         for cc in cs:
