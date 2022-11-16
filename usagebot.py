@@ -67,10 +67,14 @@ def parse_gpu(gpu):
     gpu = gpu[15:-1]
     if gpu == "N/A":
         return []
-    if "-" in gpu:
-       gpu = list(range(int(gpu[0]), 1+int(gpu[2])))
-    else:
-       gpu = [int(gpu)]
+    gpus = gpu.split(",")
+    fgpus = []
+    for g in gpus:
+        if "-" in gpu:
+            g = list(range(int(g[0]), 1+int(g[2])))
+        else:
+            g = [int(g)]
+        fgpus.extend(g)
     return gpu
 
 def backtick(msg):
