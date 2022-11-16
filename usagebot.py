@@ -37,11 +37,12 @@ def compute_power_per_node():
         df = None
         for cc in cs:
             dd = pd.read_csv(StringIO(cc))
+            dd["power"] = pd.to_numeric(dd[" power.draw [W]"], errors="coerce")
             if df is None:
                 df = dd
             else:
-                df[" power.draw [W]"] += pd.to_numeric(dd[" power.draw [W]"], errors="coerce")
-        df["power"] = pd.to_numeric(df[" power.draw [W]"], errors="coerce")/5
+                df["power"] += dd["power"]
+        df["power"] = df["power"]/5
         for i, p in zip(df["index"], df["power"]):
             node_gpu_to_power_usage[o.host+":"+str(i)] = p
     return node_gpu_to_power_usage
