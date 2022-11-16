@@ -70,7 +70,7 @@ def parse_gpu(gpu):
     gpus = gpu.split(",")
     fgpus = []
     for g in gpus:
-        if "-" in gpu:
+        if "-" in g:
             g = list(range(int(g[0]), 1+int(g[2])))
         else:
             g = [int(g)]
