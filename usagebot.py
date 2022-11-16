@@ -75,7 +75,7 @@ def parse_gpu(gpu):
         else:
             g = [int(g)]
         fgpus.extend(g)
-    return gpu
+    return fgpus
 
 def backtick(msg):
     lines = msg.split("\n")
