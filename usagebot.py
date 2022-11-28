@@ -75,6 +75,7 @@ def parse_gpu(gpu):
         else:
             g = [int(g)]
         fgpus.extend(g)
+
     return fgpus
 
 def backtick(msg):
@@ -96,12 +97,22 @@ def get_msg():
 
     sums = []
     gpu_counts = []
-    for gpus,nodes in zip(df["gres_detail"], df["nodes"]):
+    for gpus,nodes,job_resources,user_name in zip(df["gres_detail"], df["nodes"], df['job_resources'], df['user_name']):
+       if 'allocated_nodes' in job_resources:
+          allocated_nodes = list(job_resources['allocated_nodes'].values())
+       else:
+          allocated_nodes = []
        fnodes = expand_nodes(nodes)
        power_usage = 0
        gpu_count = 0
-       for gpu,node in zip(gpus,fnodes):
-          gpu = parse_gpu(gpu)
+       for i, node in enumerate(fnodes):
+          allocated_node=allocated_nodes[i]
+          gpu = gpus[i] if i < len(gpus) else None
+          cpus_used = allocated_node['cpus']
+          if gpu is None:
+              gpu = list(range(int(cpus_used/6)))
+          else:
+              gpu = parse_gpu(gpu)
           gpu_count += len(gpu) 
           for g in gpu:
               power_usage += node_gpu_to_power_usage[node+":"+str(g)] if node+":"+str(g) in node_gpu_to_power_usage else 0
@@ -113,7 +124,17 @@ def get_msg():
 
     a = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))
 
-    num_idles = sum([int(a['gres'][-1]) - len(parse_gpu(a['gres_used'])) for a in  a['nodes'] if 'gpu' in a['name'] and 'POWERED_DOWN' not in a['state_flags']])
+    def count_idle_gpus(a):
+        used_gpus=len(parse_gpu(a['gres_used']))
+        gpus = int(a['gres'][-1])
+        idle_gpus = gpus - used_gpus
+        idle_cpus=a['idle_cpus']
+        cpus = a['cpus']
+        usable_gpus = int(idle_cpus / 6)
+        return min(idle_gpus, usable_gpus)
+
+
+    num_idles = sum([count_idle_gpus(a) for a in  a['nodes'] if 'gpu' in a['name'] and 'POWERED_DOWN' not in a['state_flags']])
 
     preemptible_accounts = [e[0] for e in [l.split("|") for l in subprocess.check_output(['sacctmgr', 'list', '--parsable', 'Account']).decode("utf8").split("\n")] if len(e) >= 3 and e[2] == "root"]
 
