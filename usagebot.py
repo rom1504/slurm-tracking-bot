@@ -17,16 +17,19 @@ from io import StringIO
 import json
 import subprocess
 
+def get_nodes():
+    nodes = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))["nodes"]
+    node_list = []
+    for n in nodes:
+        node_list.append(n["name"])
+    return node_list
+
 def compute_power_per_node():
-    m = 465
+    m = 10000
     #m = 3
-    hosts = ["gpu-st-p4d-24xlarge-"+str(i) for i in range(1,m)]
-    client = ParallelSSHClient(hosts, timeout=10, pool_size=500)
-
+    hosts = get_nodes()[:m]
+    client = ParallelSSHClient(hosts, timeout=10, pool_size=len(hosts))
     output = list(client.run_command('bash -c "for i in {1..5} ; do nvidia-smi --query-gpu=index,power.draw  --format=csv,nounits ; echo  ; sleep 1; done"', stop_on_errors=False))
-
-
-
     node_gpu_to_power_usage = {}
     for o in output:
         try:
@@ -48,19 +51,11 @@ def compute_power_per_node():
     return node_gpu_to_power_usage
 
 def expand_nodes(s):
-        s = s.replace("gpu-st-p4d-24xlarge-", "").replace("[","").replace("]","")
-        ns = list(s.split(","))
-        nodes = []
-        for n in ns:
-            if n  == "":
-                continue
-            if "-" in n:
-                b = int(n.split("-")[0])
-                e = int(n.split("-")[1])
-                nodes.extend(list(range(b,e+1)))
-            else:
-                nodes.append(int(n))
-        return ["gpu-st-p4d-24xlarge-"+str(n) for n in nodes]
+    if s == "":
+        return []
+    c = "sinfo -N -n "+s+" | tail -n +2 | awk '{print $1}'"
+    hosts = subprocess.check_output(c, shell=True).decode("utf8")[:-1].split("\n")
+    return hosts
 
 # looks like gpu:a100:8(IDX:0-7)
 def parse_gpu(gpu):
@@ -75,7 +70,6 @@ def parse_gpu(gpu):
         else:
             g = [int(g)]
         fgpus.extend(g)
-
     return fgpus
 
 def backtick(msg):
@@ -98,8 +92,8 @@ def get_msg():
     sums = []
     gpu_counts = []
     for gpus,nodes,job_resources,user_name in zip(df["gres_detail"], df["nodes"], df['job_resources'], df['user_name']):
-       if 'allocated_nodes' in job_resources:
-          allocated_nodes = list(job_resources['allocated_nodes'].values())
+       if not isinstance(job_resources,float) and 'allocated_nodes' in job_resources:
+          allocated_nodes = [x for x in job_resources["allocated_nodes"]]
        else:
           allocated_nodes = []
        fnodes = expand_nodes(nodes)
@@ -108,9 +102,9 @@ def get_msg():
        for i, node in enumerate(fnodes):
           allocated_node=allocated_nodes[i]
           gpu = gpus[i] if i < len(gpus) else None
-          cpus_used = allocated_node['cpus']
+          cpus_used = allocated_node['cpus_used']
           if gpu is None:
-              gpu = list(range(int(cpus_used/6)))
+              gpu = list(range(int(cpus_used/12)))
           else:
               gpu = parse_gpu(gpu)
           gpu_count += len(gpu) 
@@ -122,19 +116,20 @@ def get_msg():
     df["sum_power_usage"] = sums
     df["gpu_count"] = gpu_counts
 
-    a = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))
+    b = json.loads(subprocess.check_output(['sinfo','--json']).decode("utf8"))
 
-    def count_idle_gpus(a):
-        used_gpus=len(parse_gpu(a['gres_used']))
-        gpus = int(a['gres'][-1])
+    def count_idle_gpus(x):
+        used_gpus=len(parse_gpu(x['gres_used']))
+        gpus = 8
         idle_gpus = gpus - used_gpus
-        idle_cpus=a['idle_cpus']
-        cpus = a['cpus']
-        usable_gpus = int(idle_cpus / 6)
+        idle_cpus=x['idle_cpus']
+        cpus = x['cpus']
+        usable_gpus = int(idle_cpus / 12)
         return min(idle_gpus, usable_gpus)
 
 
-    num_idles = sum([count_idle_gpus(a) for a in  a['nodes'] if 'gpu' in a['name'] and 'POWERED_DOWN' not in a['state_flags']])
+    num_idles = sum([count_idle_gpus(x) for x in  b['nodes'] if 'gpu' in x['gres'] and x['state_flags'] == []])
+    broken_nodes = len([x for x in b['nodes'] if x['state_flags'] != []])
 
     preemptible_accounts = [e[0] for e in [l.split("|") for l in subprocess.check_output(['sacctmgr', 'list', '--parsable', 'Account']).decode("utf8").split("\n")] if len(e) >= 3 and e[2] == "root"]
 
@@ -148,26 +143,35 @@ def get_msg():
         g = g.sort_values("gpu_count")
         return str(g)
 
-    df = df[df["partition"] == "gpu"]
+    def group_per_user_name_node(df):
+        s = df.groupby(["account", "user_name"]).sum()
+        g = s[["node_count"]]
+        g = g.sort_values("node_count")
+        return str(g)
+
+
+    df = df[df["partition"].str.startswith("g")]
     running = df[df["job_state"] == "RUNNING"]
     pending = df[df["job_state"] == "PENDING"]
     preemptible = running[running["account"].isin(preemptible_accounts)]
     non_preemptible = running[~running["account"].isin(preemptible_accounts)]
 
-    pending_count = sum(pending["gpu_count"].values)
+    pending_count = sum(pending["node_count"].values)
     preemptible_count = sum(preemptible["gpu_count"].values)
     non_preemptible_count = sum(non_preemptible["gpu_count"].values)
 
     group1 = ""
-    group1 += "Pending:\n"+group_per_user_name(pending)+"\n\n"
+    group1 += "Pending:\n"+group_per_user_name_node(pending)+"\n\n"
     group1 += "Preemptible:\n"+group_per_user_name(preemptible)+"\n\n"
 
     group2 = ""
     group2 += "Non-preemptible:\n"+group_per_user_name(non_preemptible)+"\n\n"
 
     group3 = ""
+    group3 += f"Pending count: {pending_count} nodes\n"
+    group3 += f"\n"
     group3 += f"Idle: {num_idles} gpus\n"
-    group3 += f"Pending count: {pending_count} gpus\n"
+    group3 += f"Broken nodes: {broken_nodes} nodes\n"
     group3 += f"Preemptible count (these jobs will be killed if needed by non preemtible): {preemptible_count} gpus\n"
     group3 += f"Non pre emptible count: {non_preemptible_count} gpus\n"
 
