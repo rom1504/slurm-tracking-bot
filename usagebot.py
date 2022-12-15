@@ -176,10 +176,10 @@ def get_msg():
     group3 += f"Non pre emptible count: {non_preemptible_count} gpus\n"
 
     msg = backtick(group1)+backtick(group2)+backtick(group3)
-    return msg
+    return msg,[group1,group2,group3]
 
 
-discord = False
+discord = True
 
 if discord:
     import discord
