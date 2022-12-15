@@ -202,25 +202,35 @@ if discord:
         print(get_msg())
         sys.exit(1)                   # might as well just stop here
 
+    class UsageBotClient(discord.Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            # an attribute we can access from our task
+            self.counter = 0
+
+        async def setup_hook(self) -> None:
+            # start the task to run in the background
+            print("starting background task")
+            self.my_background_task.start()
+
+        async def on_ready(self):
+            return
+
+        @tasks.loop(hours=12)
+        async def my_background_task(self):
+            channel = self.get_channel(channel_id)  # channel ID goes here
+            print(f"sending message to {channel_id}")
+            msg, groups = get_msg()
+            for m in groups:
+                await channel.send(backtick(m))
+
+        @my_background_task.before_loop
+        async def before_my_task(self):
+            await self.wait_until_ready()  # wait until the bot logs in
 
     # Initialize bot client object
-    client = discord.Client()
-
-
-    # Setup background task 
-    @tasks.loop(hours=12)
-    async def my_background_task():
-        """A background task that gets invoked every __ hours."""
-        channel = client.get_channel(channel_id) 
-        await channel.send(get_msg())
-        
-    @my_background_task.before_loop
-    async def my_background_task_before_loop():
-        await client.wait_until_ready()
-
-    my_background_task.start()
-
-
+    client = UsageBotClient(intents=discord.Intents.default())
     # Run the bot
     client.run(token)
 else:
