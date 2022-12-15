@@ -26,7 +26,7 @@ def get_nodes():
 
 def compute_power_per_node():
     m = 10000
-    #m = 3
+    #m = 3 # use to test quickly
     hosts = get_nodes()[:m]
     client = ParallelSSHClient(hosts, timeout=10, pool_size=len(hosts))
     output = list(client.run_command('bash -c "for i in {1..5} ; do nvidia-smi --query-gpu=index,power.draw  --format=csv,nounits ; echo  ; sleep 1; done"', stop_on_errors=False))
@@ -129,7 +129,9 @@ def get_msg():
 
 
     num_idles = sum([count_idle_gpus(x) for x in  b['nodes'] if 'gpu' in x['gres'] and x['state_flags'] == []])
+    total_available = sum([8 for x in  b['nodes'] if 'gpu' in x['gres'] and x['state_flags'] == []])
     broken_nodes = len([x for x in b['nodes'] if x['state_flags'] != []])
+    broken_gpus = broken_nodes * 8
 
     preemptible_accounts = [e[0] for e in [l.split("|") for l in subprocess.check_output(['sacctmgr', 'list', '--parsable', 'Account']).decode("utf8").split("\n")] if len(e) >= 3 and e[2] == "root"]
 
@@ -146,7 +148,8 @@ def get_msg():
     def group_per_user_name_node(df):
         s = df.groupby(["account", "user_name"]).sum()
         g = s[["node_count"]]
-        g = g.sort_values("node_count")
+        g["gpu_count"] = g["node_count"] * 8
+        g = g.sort_values("gpu_count")
         return str(g)
 
 
@@ -156,7 +159,7 @@ def get_msg():
     preemptible = running[running["account"].isin(preemptible_accounts)]
     non_preemptible = running[~running["account"].isin(preemptible_accounts)]
 
-    pending_count = sum(pending["node_count"].values)
+    pending_count = sum(pending["node_count"].values) * 8
     preemptible_count = sum(preemptible["gpu_count"].values)
     non_preemptible_count = sum(non_preemptible["gpu_count"].values)
 
@@ -168,12 +171,13 @@ def get_msg():
     group2 += "Non-preemptible:\n"+group_per_user_name(non_preemptible)+"\n\n"
 
     group3 = ""
-    group3 += f"Pending count: {pending_count} nodes\n"
+    group3 += f"Pending count (not running, can be more than total capacity): {pending_count} gpus\n"
+    group3 += f"Broken gpu (down or drain state): {broken_gpus} gpus\n"
     group3 += f"\n"
     group3 += f"Idle: {num_idles} gpus\n"
-    group3 += f"Broken nodes: {broken_nodes} nodes\n"
     group3 += f"Preemptible count (these jobs will be killed if needed by non preemtible): {preemptible_count} gpus\n"
     group3 += f"Non pre emptible count: {non_preemptible_count} gpus\n"
+    group3 += f"Total available: {total_available} gpus\n"
 
     msg = backtick(group1)+backtick(group2)+backtick(group3)
     return msg
@@ -198,35 +202,25 @@ if discord:
         print(get_msg())
         sys.exit(1)                   # might as well just stop here
 
-    class UsageBotClient(discord.Client):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-
-            # an attribute we can access from our task
-            self.counter = 0
-
-        async def setup_hook(self) -> None:
-            # start the task to run in the background
-            print("starting background task")
-            self.my_background_task.start()
-
-        async def on_ready(self):
-            return
-
-        @tasks.loop(hours=12)
-        async def my_background_task(self):
-            channel = self.get_channel(channel_id)  # channel ID goes here
-            print(f"sending message to {channel_id}")
-            msg, groups = get_msg()
-            for m in groups:
-                await channel.send(backtick(m))
-
-        @my_background_task.before_loop
-        async def before_my_task(self):
-            await self.wait_until_ready()  # wait until the bot logs in
 
     # Initialize bot client object
-    client = UsageBotClient(intents=discord.Intents.default())
+    client = discord.Client()
+
+
+    # Setup background task 
+    @tasks.loop(hours=12)
+    async def my_background_task():
+        """A background task that gets invoked every __ hours."""
+        channel = client.get_channel(channel_id) 
+        await channel.send(get_msg())
+        
+    @my_background_task.before_loop
+    async def my_background_task_before_loop():
+        await client.wait_until_ready()
+
+    my_background_task.start()
+
+
     # Run the bot
     client.run(token)
 else:
