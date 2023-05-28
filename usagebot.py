@@ -75,11 +75,15 @@ def parse_gpu(gpu):
 def backtick(msg):
     lines = msg.split("\n")
     final_lines= []
+    final_chunks=[]
     for i in range(0, len(lines), 30):
-        final_lines.append("```\n")
-        final_lines.extend(lines[i:(i+30)])
-        final_lines.append("```\n\n")
-    return "\n".join(final_lines)
+        chunk=[]
+        chunk.append("```\n")
+        chunk.extend(lines[i:(i+30)])
+        chunk.append("```\n\n")
+        final_chunks.append(chunk)
+        final_lines.extend(chunk)
+    return "\n".join(final_lines),final_chunks
 
 def get_msg():
 
@@ -180,10 +184,10 @@ def get_msg():
     group3 += f"Total available: {total_available} gpus\n"
 
     msg = backtick(group1)+backtick(group2)+backtick(group3)
-    return msg
+    return msg,[group1,group2,group3]
 
 
-discord = False
+discord = True
 
 if discord:
     import discord
@@ -223,7 +227,9 @@ if discord:
             print(f"sending message to {channel_id}")
             msg, groups = get_msg()
             for m in groups:
-                await channel.send(backtick(m))
+                msg, chunks = backtick(m)
+                for c in chunks:
+                    await channel.send(c)
 
         @my_background_task.before_loop
         async def before_my_task(self):
